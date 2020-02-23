@@ -1,24 +1,33 @@
-// tslint:disable:no-console
-import * as k8s from '@kubernetes/client-node';
+import { ListWatch } from './cache';
+import { KubeConfig } from './config';
+import { KubernetesListObject, KubernetesObject } from './types';
+import { Watch } from './watch';
 
-const kc = new k8s.KubeConfig();
-kc.loadFromDefault();
+import http = require('http');
 
-const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
+export type ObjectCallback<T extends KubernetesObject> = (obj: T) => void;
+export type ListCallback<T extends KubernetesObject> = (list: T[], ResourceVersion: string) => void;
+export type ListPromise<T extends KubernetesObject> = () => Promise<{
+    response: http.IncomingMessage;
+    body: KubernetesListObject<T>;
+}>;
 
-const listFn = () => k8sApi.listNamespacedPod('default');
+export const ADD: string = 'add';
+export const UPDATE: string = 'update';
+export const DELETE: string = 'delete';
+export const ERROR: string = 'error';
 
-const informer = k8s.makeInformer(kc, '/api/v1/namespaces/default/pods', listFn);
+export interface Informer<T> {
+    on(verb: string, fn: ObjectCallback<T>);
+    off(verb: string, fn: ObjectCallback<T>);
+    start(): Promise<void>;
+}
 
-informer.on('add', (obj: k8s.V1Pod) => { console.log(`Added: ${obj.metadata!.name}`); });
-informer.on('update', (obj: k8s.V1Pod) => { console.log(`Updated: ${obj.metadata!.name}`); });
-informer.on('delete', (obj: k8s.V1Pod) => { console.log(`Deleted: ${obj.metadata!.name}`); });
-informer.on('error', (err: k8s.V1Pod) => {
-  console.error(err);
-  // Restart informer after 5sec
-  setTimeout(() => {
-    informer.start();
-  }, 5000);
-});
-
-informer.start();
+export function makeInformer<T>(
+    kubeconfig: KubeConfig,
+    path: string,
+    listPromiseFn: ListPromise<T>,
+): Informer<T> {
+    const watch = new Watch(kubeconfig);
+    return new ListWatch<T>(path, watch, listPromiseFn, false);
+}
